@@ -1,0 +1,80 @@
+version: "3.8"
+
+services:
+  # Mock GPU Node Manager - simulates multi-node GPU cluster
+  gpu-node-manager:
+    build: ./services/gpu-node-manager
+    ports:
+      - "8001:8000"
+    environment:
+      - NUM_NODES=4
+      - GPUS_PER_NODE=2
+      - GPU_TYPES=T4,A100,V100,T4
+
+  # Mock Cost/Billing API - simulates cloud billing
+  billing-api:
+    build: ./services/billing-api
+    ports:
+      - "8002:8000"
+    environment:
+      - T4_PRICE_PER_HOUR=0.35
+      - A100_PRICE_PER_HOUR=3.67
+      - V100_PRICE_PER_HOUR=2.48
+      - SPOT_DISCOUNT=0.70
+
+  # Mock Spot Instance Manager
+  spot-manager:
+    build: ./services/spot-manager
+    ports:
+      - "8003:8000"
+    depends_on:
+      - gpu-node-manager
+      - billing-api
+    environment:
+      - PREEMPTION_PROBABILITY=0.15
+      - SPOT_DISCOUNT=0.70
+
+  # KEDA-like Autoscaler Simulator
+  autoscaler:
+    build: ./services/autoscaler
+    ports:
+      - "8004:8000"
+    depends_on:
+      - gpu-node-manager
+      - billing-api
+    environment:
+      - SCALE_UP_THRESHOLD=80
+      - SCALE_DOWN_THRESHOLD=20
+      - COOLDOWN_SECONDS=60
+      - MAX_NODES=8
+      - MIN_NODES=1
+
+  # OpenCost-like Cost Tracker
+  cost-tracker:
+    build: ./services/cost-tracker
+    ports:
+      - "8005:8000"
+    depends_on:
+      - gpu-node-manager
+      - billing-api
+      - spot-manager
+    environment:
+      - AGGREGATION_INTERVAL=10
+
+  # API Gateway - single entry point for notebook
+  gateway:
+    build: ./services/gateway
+    ports:
+      - "8000:8000"
+    depends_on:
+      - gpu-node-manager
+      - billing-api
+      - spot-manager
+      - autoscaler
+      - cost-tracker
+    environment:
+      - GPU_NODE_URL=http://gpu-node-manager:8000
+      - BILLING_URL=http://billing-api:8000
+      - SPOT_URL=http://spot-manager:8000
+      - AUTOSCALER_URL=http://autoscaler:8000
+      - COST_TRACKER_URL=http://cost-tracker:8000
